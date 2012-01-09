@@ -26,6 +26,7 @@
  * The resize functions come from the resize_image project, at http://www.golac.fr/Image-Resizer
  */
 
+#include "config.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -33,7 +34,11 @@
 #include <sys/types.h>
 #include <setjmp.h>
 #include <jpeglib.h>
+#ifdef HAVE_MACHINE_ENDIAN_H
+#include <machine/endian.h>
+#else
 #include <endian.h>
+#endif
 
 #include "upnpreplyparse.h"
 #include "image_utils.h"
@@ -237,38 +242,41 @@ image_get_jpeg_resolution(const char * path, int * width, int * height)
 	unsigned char buf[8];
 	u_int16_t offset, h, w;
 	int ret = 1;
+	size_t nread;
 	long size;
 	
 
 	img = fopen(path, "r");
 	if( !img )
-		return(-1);
+		return -1;
 
 	fseek(img, 0, SEEK_END);
 	size = ftell(img);
 	rewind(img);
 
-	fread(&buf, 2, 1, img);
-	if( (buf[0] != 0xFF) || (buf[1] != 0xD8) )
+	nread = fread(&buf, 2, 1, img);
+	if( (nread < 1) || (buf[0] != 0xFF) || (buf[1] != 0xD8) )
 	{
 		fclose(img);
-		return(-1);
+		return -1;
 	}
 	memset(&buf, 0, sizeof(buf));
 
 	while( ftell(img) < size )
 	{
-		while( buf[0] != 0xFF && !feof(img) )
-			fread(&buf, 1, 1, img);
+		while( nread > 0 && buf[0] != 0xFF && !feof(img) )
+			nread = fread(&buf, 1, 1, img);
 
-		while( buf[0] == 0xFF && !feof(img) )
-			fread(&buf, 1, 1, img);
+		while( nread > 0 && buf[0] == 0xFF && !feof(img) )
+			nread = fread(&buf, 1, 1, img);
 
 		if( (buf[0] >= 0xc0) && (buf[0] <= 0xc3) )
 		{
-			fread(&buf, 7, 1, img);
+			nread = fread(&buf, 7, 1, img);
 			*width = 0;
 			*height = 0;
+			if( nread < 1 )
+				break;
 			memcpy(&h, buf+3, 2);
 			*height = SWAP16(h);
 			memcpy(&w, buf+5, 2);
@@ -279,7 +287,9 @@ image_get_jpeg_resolution(const char * path, int * width, int * height)
 		else
 		{
 			offset = 0;
-			fread(&buf, 2, 1, img);
+			nread = fread(&buf, 2, 1, img);
+			if( nread < 1 )
+				break;
 			memcpy(&offset, buf, 2);
 			offset = SWAP16(offset) - 2;
 			if( fseek(img, offset, SEEK_CUR) == -1 )
@@ -300,13 +310,14 @@ image_get_jpeg_date_xmp(const char * path, char ** date)
 	struct NameValueParserData xml;
 	char * exif;
 	int ret = 1;
+	size_t nread;
 
 	img = fopen(path, "r");
 	if( !img )
 		return(-1);
 
-	fread(&buf, 2, 1, img);
-	if( (buf[0] != 0xFF) || (buf[1] != 0xD8) )
+	nread = fread(&buf, 2, 1, img);
+	if( (nread < 1) || (buf[0] != 0xFF) || (buf[1] != 0xD8) )
 	{
 		fclose(img);
 		return(-1);
@@ -315,11 +326,11 @@ image_get_jpeg_date_xmp(const char * path, char ** date)
 
 	while( !feof(img) )
 	{
-		while( buf[0] != 0xFF && !feof(img) )
-			fread(&buf, 1, 1, img);
+		while( nread > 0 && buf[0] != 0xFF && !feof(img) )
+			nread = fread(&buf, 1, 1, img);
 
-		while( buf[0] == 0xFF && !feof(img) )
-			fread(&buf, 1, 1, img);
+		while( nread > 0 && buf[0] == 0xFF && !feof(img) )
+			nread = fread(&buf, 1, 1, img);
 
 		if( feof(img) )
 			break;
@@ -327,7 +338,9 @@ image_get_jpeg_date_xmp(const char * path, char ** date)
 		if( buf[0] == 0xE1 ) // APP1 marker
 		{
 			offset = 0;
-			fread(&buf, 2, 1, img);
+			nread = fread(&buf, 2, 1, img);
+			if( nread < 1 )
+				break;
 			memcpy(&offset, buf, 2);
 			offset = SWAP16(offset) - 2;
 
@@ -342,7 +355,9 @@ image_get_jpeg_date_xmp(const char * path, char ** date)
 				break;
 			data = newdata;
 
-			fread(data, 29, 1, img);
+			nread = fread(data, 29, 1, img);
+			if( nread < 1 )
+				break;
 			offset -= 29;
 			if( strcmp(data, "http://ns.adobe.com/xap/1.0/") != 0 )
 			{
@@ -354,7 +369,9 @@ image_get_jpeg_date_xmp(const char * path, char ** date)
 			if( !newdata )
 				break;
 			data = newdata;
-			fread(data, offset, 1, img);
+			nread = fread(data, offset, 1, img);
+			if( nread < 1 )
+				break;
 
 			ParseNameValue(data, offset, &xml);
 			exif = GetValueFromNameValueList(&xml, "DateTimeOriginal");
@@ -373,15 +390,16 @@ image_get_jpeg_date_xmp(const char * path, char ** date)
 		else
 		{
 			offset = 0;
-			fread(&buf, 2, 1, img);
+			nread = fread(&buf, 2, 1, img);
+			if( nread < 1 )
+				break;
 			memcpy(&offset, buf, 2);
 			offset = SWAP16(offset) - 2;
 			fseek(img, offset, SEEK_CUR);
 		}
 	}
 	fclose(img);
-	if( data )
-		free(data);
+	free(data);
 	return ret;
 }
 
@@ -463,8 +481,7 @@ image_new_from_jpeg(const char * path, int is_file, const char * buf, int size, 
 			fclose(file);
 		if( vimage )
 		{
-			if( vimage->buf )
-				free(vimage->buf);
+			free(vimage->buf);
 			free(vimage);
 		}
 		return NULL;

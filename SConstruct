@@ -189,12 +189,24 @@ def CheckPKG(context, name):
     checked_packages[key] = ret
     return ret
 
+def CheckIconv(context):
+   context.Message('Checking iconv... ')
+   t = """
+       #include <iconv.h>
+       int main() { size_t r = iconv(0, (%s)0, 0, (char**)0, 0); return 0; }
+       """
+   ret = context.TryCompile(t % 'const char **' , '.cc')
+
+   context.Result(ret)
+   return ret
+
 conf = Configure(
     env, 
     config_h="src/config.h",
     custom_tests = {
     'CheckPKGConfig' : CheckPKGConfig,
-    'CheckPKG' : CheckPKG
+    'CheckPKG' : CheckPKG,
+	 'CheckIconv' : CheckIconv
     }
 )    
 
@@ -267,6 +279,14 @@ if not env.GetOption('clean') and not env.GetOption('help'):
         conf.Define('HAVE_INOTIFY_H',1)
     
     conf.CheckCHeader('iconv.h')
+
+    conf.config_h_text += "\n"
+
+    if conf.CheckIconv():
+		  conf.Define('ICONV_CONST', 'const');
+    else:
+		  conf.Define('ICONV_CONST');
+		  
     
     if GetOption("enable_nls") and conf.CheckCHeader('libintl.h'):
         conf.config_h_text += "\n"

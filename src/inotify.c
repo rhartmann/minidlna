@@ -18,6 +18,8 @@
 #ifdef HAVE_CONFIG_H
 #include "config.h"
 #endif /* HAVE_CONFIG_H */
+
+#ifdef HAVE_INOTIFY
 #include <stdio.h>
 #include <string.h>
 #include <stdlib.h>
@@ -31,7 +33,7 @@
 #include <sys/time.h>
 #include <sys/resource.h>
 #include <poll.h>
-#ifdef HAVE_INOTIFY_H
+#ifdef HAVE_SYS_INOTIFY_H
 #include <sys/inotify.h>
 #else
 #include "linux/inotify.h"
@@ -218,8 +220,7 @@ inotify_remove_watches(int fd)
 	{
 		last_w = w;
 		inotify_rm_watch(fd, w->wd);
-		if( w->path )
-			free(w->path);
+		free(w->path);
 		rm_watches++;
 		w = w->next;
 		free(last_w);
@@ -598,6 +599,8 @@ inotify_remove_directory(int fd, const char * path)
 	sqlite_int64 detailID = 0;
 	int rows, i, ret = 1;
 
+	/* Invalidate the scanner cache so we don't insert files into non-existent containers */
+	valid_cache = 0;
 	remove_watch(fd, path);
 	sql = sqlite3_mprintf("SELECT ID from DETAILS where PATH glob '%q/*'"
 	                      " UNION ALL SELECT ID from DETAILS where PATH = '%q'", path, path);
@@ -736,3 +739,4 @@ quitting:
 
 	return 0;
 }
+#endif

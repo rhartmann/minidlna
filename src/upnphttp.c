@@ -54,6 +54,7 @@
 #include <sys/socket.h>
 #include <sys/param.h>
 #include <ctype.h>
+#include <fcntl.h>
 #ifdef HAVE_CONFIG_H
 #include "config.h"
 #endif /* HAVE_CONFIG_H */
@@ -62,13 +63,6 @@
 #include "minidlnapath.h"
 #include "upnpsoap.h"
 #include "upnpevents.h"
-
-#include <sys/types.h>
-#include <sys/stat.h>
-#include <fcntl.h>
-#include <errno.h>
-#include <sys/sendfile.h>
-#include <arpa/inet.h>
 
 #include "upnpglobalvars.h"
 #include "utils.h"
@@ -81,6 +75,9 @@
 #include "tivo_utils.h"
 #include "tivo_commands.h"
 #endif
+
+#include "sendfile.h"
+
 //#define MAX_BUFFER_SIZE 4194304 // 4MB -- Too much?
 #define MAX_BUFFER_SIZE 2147483647 // 2GB -- Too much?
 #define MIN_BUFFER_SIZE 65536
@@ -284,6 +281,7 @@ intervening space) by either an integer or the keyword "infinite". */
 			}
 			else if(strncasecmp(line, "User-Agent", 10)==0)
 			{
+				char *s;
 				/* Skip client detection if we already detected it. */
 				if( h->req_client )
 					goto next_header;
@@ -302,13 +300,13 @@ intervening space) by either an integer or the keyword "infinite". */
 					h->reqflags |= FLAG_DLNA;
 					h->reqflags |= FLAG_MIME_AVI_DIVX;
 				}
-				else if(strstrc(p, "SEC_HHP_", '\r'))
+				else if((s=strstrc(p, "SEC_HHP_", '\r')))
 				{
 					h->req_client = ESamsungSeriesC;
 					h->reqflags |= FLAG_SAMSUNG;
 					h->reqflags |= FLAG_DLNA;
 					h->reqflags |= FLAG_NO_RESIZE;
-					if(strstrc(p, "SEC_HHP_TV", '\r'))
+					if(strstrc(s+8, "TV", '\r'))
 						h->reqflags |= FLAG_SAMSUNG_TV;
 				}
 				else if(strncmp(p, "SamsungWiselinkPro", 18)==0)
@@ -773,6 +771,18 @@ ProcessHttpQuery_upnphttp(struct upnphttp * h)
 	HttpVer[i] = '\0';
 	/*DPRINTF(E_INFO, L_HTTP, "HTTP REQUEST : %s %s (%s)\n",
 	       HttpCommand, HttpUrl, HttpVer);*/
+
+	/* set the interface here initially, in case there is no Host header */
+	for(i = 0; i<n_lan_addr; i++)
+	{
+		if( (h->clientaddr.s_addr & lan_addr[i].mask.s_addr)
+		   == (lan_addr[i].addr.s_addr & lan_addr[i].mask.s_addr))
+		{
+			h->iface = i;
+			break;
+		}
+	}
+
 	ParseHttpHeaders(h);
 
 	/* see if we need to wait for remaining data */
@@ -818,7 +828,7 @@ ProcessHttpQuery_upnphttp(struct upnphttp * h)
 			Send400(h);
 			return;
 		}
-		#if 1 /* 7.3.33.4 */
+		/* 7.3.33.4 */
 		else if( ((h->reqflags & FLAG_TIMESEEK) || (h->reqflags & FLAG_PLAYSPEED)) &&
 		         !(h->reqflags & FLAG_RANGE) )
 		{
@@ -827,7 +837,6 @@ ProcessHttpQuery_upnphttp(struct upnphttp * h)
 			Send406(h);
 			return;
 		}
-		#endif
 		else if(strcmp("GET", HttpCommand) == 0)
 		{
 			h->req_command = EGet;
@@ -1172,14 +1181,17 @@ send_file(struct upnphttp * h, int sendfd, off_t offset, off_t end_offset)
 	off_t send_size;
 	off_t ret;
 	char *buf = NULL;
+#if HAVE_SENDFILE
 	int try_sendfile = 1;
+#endif
 
 	while( offset < end_offset )
 	{
+#if HAVE_SENDFILE
 		if( try_sendfile )
 		{
 			send_size = ( ((end_offset - offset) < MAX_BUFFER_SIZE) ? (end_offset - offset + 1) : MAX_BUFFER_SIZE);
-			ret = sendfile(h->socket, sendfd, &offset, send_size);
+			ret = sys_sendfile(h->socket, sendfd, &offset, send_size);
 			if( ret == -1 )
 			{
 				DPRINTF(E_DEBUG, L_HTTP, "sendfile error :: error no. %d [%s]\n", errno, strerror(errno));
@@ -1195,6 +1207,7 @@ send_file(struct upnphttp * h, int sendfd, off_t offset, off_t end_offset)
 				continue;
 			}
 		}
+#endif
 		/* Fall back to regular I/O */
 		if( !buf )
 			buf = malloc(MIN_BUFFER_SIZE);
