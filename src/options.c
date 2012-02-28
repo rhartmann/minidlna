@@ -32,6 +32,7 @@
 #include <stdlib.h>
 #include <ctype.h>
 #include "options.h"
+#include "utils.h"
 #include "upnpglobalvars.h"
 
 struct option * ary_options = NULL;
@@ -57,6 +58,8 @@ static const struct {
 	{ UPNPINOTIFY, "inotify" },
 	{ UPNPDBDIR, "db_dir" },
 	{ UPNPLOGDIR, "log_dir" },
+	{ UPNPLOGLEVEL, "log_level" },
+	{ UPNPMINISSDPDSOCKET, "minissdpdsocket"},
 	{ ENABLE_TIVO, "enable_tivo" },
 	{ ENABLE_DLNA_STRICT, "strict_dlna" },
 	{ UPNPMINISSDPDSOCKET, "minissdpdsocket"},
@@ -168,7 +171,7 @@ readoptionsfile(const char * fname)
 				ary_options = (struct option *)t;
 
 			ary_options[num_options-1].id = id;
-			strncpy(ary_options[num_options-1].value, value, MAX_OPTION_VALUE_LEN);
+			strncpyt(ary_options[num_options-1].value, value, MAX_OPTION_VALUE_LEN);
 		}
 
 	}

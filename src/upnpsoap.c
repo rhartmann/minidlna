@@ -136,6 +136,8 @@ IsAuthorizedValidated(struct upnphttp * h, const char * action)
 
 	ParseNameValue(h->req_buf + h->req_contentoff, h->req_contentlen, &data);
 	id = GetValueFromNameValueList(&data, "DeviceID");
+	if (!id)
+		id = strstr(h->req_buf + h->req_contentoff, "<DeviceID>");
 	if(id)
 	{
 		bodylen = snprintf(body, sizeof(body), resp,
@@ -381,6 +383,7 @@ mime_to_ext(const char * mime, char * buf)
 #define FILTER_UPNP_GENRE                        0x00040000
 #define FILTER_UPNP_ORIGINALTRACKNUMBER          0x00080000
 #define FILTER_UPNP_SEARCHCLASS                  0x00100000
+#define FILTER_UPNP_STORAGEUSED                  0x00200000
 /* Vendor-specific filter flags */
 #define FILTER_SEC_CAPTION_INFO_EX               0x01000000
 #define FILTER_SEC_DCM_INFO                      0x02000000
@@ -464,6 +467,10 @@ set_filter_flags(char * filter, struct upnphttp *h)
 		else if( strcmp(item, "upnp:searchClass") == 0 )
 		{
 			flags |= FILTER_UPNP_SEARCHCLASS;
+		}
+		else if( strcmp(item, "upnp:storageUsed") == 0 )
+		{
+			flags |= FILTER_UPNP_STORAGEUSED;
 		}
 		else if( strcmp(item, "res") == 0 )
 		{
@@ -573,7 +580,7 @@ parse_sort_criteria(char *sortCriteria, int *error)
 		}
 		else
 		{
-			DPRINTF(E_DEBUG, L_HTTP, "No order specified [%s]\n", item);
+			DPRINTF(E_ERROR, L_HTTP, "No order specified [%s]\n", item);
 			*error = -1;
 			goto unhandled_order;
 		}
@@ -600,7 +607,7 @@ parse_sort_criteria(char *sortCriteria, int *error)
 		}
 		else
 		{
-			DPRINTF(E_DEBUG, L_HTTP, "Unhandled SortCriteria [%s]\n", item);
+			DPRINTF(E_ERROR, L_HTTP, "Unhandled SortCriteria [%s]\n", item);
 			*error = -1;
 			if( i )
 			{
@@ -649,10 +656,12 @@ add_resized_res(int srcw, int srch, int reqw, int reqh, char *dlna_pn,
 		}
 		strcatf(args->str, "resolution=\"%dx%d\" ", dstw, dsth);
 	}
-	strcatf(args->str, "protocolInfo=\"http-get:*:image/jpeg:DLNA.ORG_PN=%s;DLNA.ORG_CI=1\"&gt;"
+	strcatf(args->str, "protocolInfo=\"http-get:*:image/jpeg:"
+	                          "DLNA.ORG_PN=%s;DLNA.ORG_CI=1;DLNA.ORG_FLAGS=%08X%024X\"&gt;"
 	                          "http://%s:%d/Resized/%s.jpg?width=%d,height=%d"
 	                          "&lt;/res&gt;",
-	                          dlna_pn, lan_addr[args->iface].str, runtime_vars.port,
+	                          dlna_pn, DLNA_FLAG_DLNA_V1_5|DLNA_FLAG_HTTP_STALLING|DLNA_FLAG_TM_B|DLNA_FLAG_TM_I, 0,
+	                          lan_addr[args->iface].str, runtime_vars.port,
 	                          detailID, dstw, dsth);
 }
 
@@ -715,7 +724,7 @@ callback(void *args, int argc, char **argv, char **azColName)
 	     *duration = argv[7], *bitrate = argv[8], *sampleFrequency = argv[9], *artist = argv[10], *album = argv[11],
 	     *genre = argv[12], *comment = argv[13], *nrAudioChannels = argv[14], *track = argv[15], *date = argv[16], *resolution = argv[17],
 	     *tn = argv[18], *creator = argv[19], *dlna_pn = argv[20], *mime = argv[21], *album_art = argv[22];
-	char dlna_buf[96];
+	char dlna_buf[128];
 	char ext[5];
 	struct string_s *str = passed_args->str;
 	int ret = 0;
@@ -750,22 +759,17 @@ callback(void *args, int argc, char **argv, char **azColName)
 	}
 	passed_args->returned++;
 
-	if( dlna_pn )
-		sprintf(dlna_buf, "DLNA.ORG_PN=%s", dlna_pn);
-	else if( passed_args->flags & FLAG_DLNA )
-		strcpy(dlna_buf, dlna_no_conv);
-	else
-		strcpy(dlna_buf, "*");
-
 	if( runtime_vars.root_container && strcmp(parent, runtime_vars.root_container) == 0 )
 		parent = "0";
 
 	if( strncmp(class, "item", 4) == 0 )
 	{
+		uint32_t dlna_flags = DLNA_FLAG_DLNA_V1_5|DLNA_FLAG_HTTP_STALLING|DLNA_FLAG_TM_B;
 		char *alt_title = NULL;
 		/* We may need special handling for certain MIME types */
 		if( *mime == 'v' )
 		{
+			dlna_flags |= DLNA_FLAG_TM_S;
 			if( passed_args->flags & FLAG_MIME_AVI_DIVX )
 			{
 				if( strcmp(mime, "video/x-msvideo") == 0 )
@@ -821,6 +825,7 @@ callback(void *args, int argc, char **argv, char **azColName)
 		}
 		else if( *mime == 'a' )
 		{
+			dlna_flags |= DLNA_FLAG_TM_S;
 			if( strcmp(mime+6, "x-flac") == 0 )
 			{
 				if( passed_args->flags & FLAG_MIME_FLAC_FLAC )
@@ -836,6 +841,22 @@ callback(void *args, int argc, char **argv, char **azColName)
 				}
 			}
 		}
+		else
+			dlna_flags |= DLNA_FLAG_TM_I;
+
+		if( dlna_pn )
+			snprintf(dlna_buf, sizeof(dlna_buf), "DLNA.ORG_PN=%s;"
+			                                     "DLNA.ORG_OP=01;"
+			                                     "DLNA.ORG_CI=0;"
+			                                     "DLNA.ORG_FLAGS=%08X%024X",
+			                                     dlna_pn, dlna_flags, 0);
+		else if( passed_args->flags & FLAG_DLNA )
+			snprintf(dlna_buf, sizeof(dlna_buf), "DLNA.ORG_OP=01;"
+			                                     "DLNA.ORG_CI=0;"
+			                                     "DLNA.ORG_FLAGS=%08X%024X",
+			                                     dlna_flags, 0);
+		else
+			strcpy(dlna_buf, "*");
 
 		ret = strcatf(str, "&lt;item id=\"%s\" parentID=\"%s\" restricted=\"1\"", id, parent);
 		if( refID && (passed_args->filter & FILTER_REFID) ) {
@@ -937,7 +958,7 @@ callback(void *args, int argc, char **argv, char **azColName)
 					ret = strcatf(str, "&lt;res protocolInfo=\"http-get:*:%s:%s\"&gt;"
 					                   "http://%s:%d/Thumbnails/%s.jpg"
 					                   "&lt;/res&gt;",
-					                   mime, "DLNA.ORG_PN=JPEG_TN", lan_addr[passed_args->iface].str,
+					                   mime, "DLNA.ORG_PN=JPEG_TN;DLNA.ORG_CI=1", lan_addr[passed_args->iface].str,
 					                   runtime_vars.port, detailID);
 				}
 			}
@@ -950,7 +971,7 @@ callback(void *args, int argc, char **argv, char **azColName)
 					     strncmp(dlna_pn, "AVC_TS_MP_HD_AC3", 16) == 0 ||
 					     strncmp(dlna_pn, "AVC_TS_HP_HD_AC3", 16) == 0))
 					{
-						sprintf(dlna_buf, "DLNA.ORG_PN=MPEG_PS_NTSC;DLNA.ORG_OP=01;DLNA.ORG_CI=0");
+						sprintf(dlna_buf, "DLNA.ORG_PN=%s;DLNA.ORG_OP=01;DLNA.ORG_CI=0", "MPEG_PS_NTSC");
 						add_res(size, duration, bitrate, sampleFrequency, nrAudioChannels,
 						        resolution, dlna_buf, mime, detailID, ext, passed_args);
 					}
@@ -962,13 +983,13 @@ callback(void *args, int argc, char **argv, char **azColName)
 					{
 						if( strncmp(dlna_pn, "MPEG_TS_SD_NA", 13) != 0 )
 						{
-							sprintf(dlna_buf, "DLNA.ORG_PN=MPEG_TS_SD_NA;DLNA.ORG_OP=01;DLNA.ORG_CI=0");
+							sprintf(dlna_buf, "DLNA.ORG_PN=%s;DLNA.ORG_OP=01;DLNA.ORG_CI=0", "MPEG_TS_SD_NA");
 							add_res(size, duration, bitrate, sampleFrequency, nrAudioChannels,
 							        resolution, dlna_buf, mime, detailID, ext, passed_args);
 						}
 						if( strncmp(dlna_pn, "MPEG_TS_SD_EU", 13) != 0 )
 						{
-							sprintf(dlna_buf, "DLNA.ORG_PN=MPEG_TS_SD_EU;DLNA.ORG_OP=01;DLNA.ORG_CI=0");
+							sprintf(dlna_buf, "DLNA.ORG_PN=%s;DLNA.ORG_OP=01;DLNA.ORG_CI=0", "MPEG_TS_SD_EU");
 							add_res(size, duration, bitrate, sampleFrequency, nrAudioChannels,
 							        resolution, dlna_buf, mime, detailID, ext, passed_args);
 						}
@@ -983,13 +1004,13 @@ callback(void *args, int argc, char **argv, char **azColName)
 						strcpy(mime+6, "avi");
 						if( !dlna_pn || strncmp(dlna_pn, "MPEG_PS_NTSC", 12) != 0 )
 						{
-							sprintf(dlna_buf, "DLNA.ORG_PN=MPEG_PS_NTSC;DLNA.ORG_OP=01;DLNA.ORG_CI=0");
+							sprintf(dlna_buf, "DLNA.ORG_PN=%s;DLNA.ORG_OP=01;DLNA.ORG_CI=0", "MPEG_PS_NTSC");
 							add_res(size, duration, bitrate, sampleFrequency, nrAudioChannels,
 						        	resolution, dlna_buf, mime, detailID, ext, passed_args);
 						}
 						if( !dlna_pn || strncmp(dlna_pn, "MPEG_PS_PAL", 11) != 0 )
 						{
-							sprintf(dlna_buf, "DLNA.ORG_PN=MPEG_PS_PAL;DLNA.ORG_OP=01;DLNA.ORG_CI=0");
+							sprintf(dlna_buf, "DLNA.ORG_PN=%s;DLNA.ORG_OP=01;DLNA.ORG_CI=0", "MPEG_PS_PAL");
 							add_res(size, duration, bitrate, sampleFrequency, nrAudioChannels,
 						        	resolution, dlna_buf, mime, detailID, ext, passed_args);
 						}
@@ -1061,7 +1082,7 @@ callback(void *args, int argc, char **argv, char **azColName)
 		                   "&lt;dc:title&gt;%s&lt;/dc:title&gt;"
 		                   "&lt;upnp:class&gt;object.%s&lt;/upnp:class&gt;",
 		                   title, class);
-		if( strcmp(class+10, "storageFolder") == 0 ) {
+		if( (passed_args->filter & FILTER_UPNP_STORAGEUSED) && strcmp(class+10, "storageFolder") == 0 ) {
 			/* TODO: Implement real folder size tracking */
 			ret = strcatf(str, "&lt;upnp:storageUsed&gt;%s&lt;/upnp:storageUsed&gt;", (size ? size : "-1"));
 		}
@@ -1265,7 +1286,7 @@ BrowseContentDirectory(struct upnphttp * h, const char * action)
 			}
 		}
 		/* If it's a DLNA client, return an error for bad sort criteria */
-		if( (args.flags & FLAG_DLNA) && ret < 0 )
+		if( ret < 0 && ((args.flags & FLAG_DLNA) || GETFLAG(DLNA_STRICT_MASK)) )
 		{
 			SoapError(h, 709, "Unsupported or invalid sort criteria");
 			goto browse_error;
@@ -1278,12 +1299,14 @@ BrowseContentDirectory(struct upnphttp * h, const char * action)
 		DPRINTF(E_DEBUG, L_HTTP, "Browse SQL: %s\n", sql);
 		ret = sqlite3_exec(db, sql, callback, (void *) &args, &zErrMsg);
 	}
-	sqlite3_free(sql);
 	if( (ret != SQLITE_OK) && (zErrMsg != NULL) )
 	{
 		DPRINTF(E_WARN, L_HTTP, "SQL error: %s\nBAD SQL: %s\n", zErrMsg, sql);
 		sqlite3_free(zErrMsg);
+		SoapError(h, 709, "Unsupported or invalid sort criteria");
+		goto browse_error;
 	}
+	sqlite3_free(sql);
 	/* Does the object even exist? */
 	if( !totalMatches )
 	{
@@ -1325,7 +1348,7 @@ SearchContentDirectory(struct upnphttp * h, const char * action)
 	int totalMatches;
 	int ret;
 	char *ContainerID, *Filter, *SearchCriteria, *SortCriteria;
-	char *orderBy = NULL;
+	char *newSearchCriteria = NULL, *orderBy = NULL;
 	char groupBy[] = "group by DETAIL_ID";
 	struct NameValueParserData data;
 	int RequestedCount = 0;
@@ -1387,20 +1410,6 @@ SearchContentDirectory(struct upnphttp * h, const char * action)
 				args.flags |= FLAG_FREE_OBJECT_ID;
 			}
 		}
-		#if 0 // Looks like the 360 already does this
-		/* Sort by track number for some containers */
-		if( orderBy &&
-		    ((strncmp(ContainerID, MUSIC_GENRE_ID, 3) == 0) ||
-		     (strncmp(ContainerID, MUSIC_ARTIST_ID, 3) == 0) ||
-		     (strncmp(ContainerID, MUSIC_ALBUM_ID, 3) == 0)) )
-		{
-			DPRINTF(E_DEBUG, L_HTTP, "Old sort order: %s\n", orderBy);
-			sprintf(str_buf, "d.TRACK, ");
-			memmove(orderBy+18, orderBy+9, strlen(orderBy)+1);
-			memmove(orderBy+9, &str_buf, 9);
-			DPRINTF(E_DEBUG, L_HTTP, "New sort order: %s\n", orderBy);
-		}
-		#endif
 	}
 	DPRINTF(E_DEBUG, L_HTTP, "Searching ContentDirectory:\n"
 	                         " * ObjectID: %s\n"
@@ -1426,7 +1435,6 @@ SearchContentDirectory(struct upnphttp * h, const char * action)
 		SearchCriteria = modifyString(SearchCriteria, "&apos;", "'", 0);
 		SearchCriteria = modifyString(SearchCriteria, "&lt;", "<", 0);
 		SearchCriteria = modifyString(SearchCriteria, "&gt;", ">", 0);
-		SearchCriteria = modifyString(SearchCriteria, "\\\"", "\"\"", 0);
 		SearchCriteria = modifyString(SearchCriteria, "object.", "", 0);
 		SearchCriteria = modifyString(SearchCriteria, "derivedfrom", "like", 1);
 		SearchCriteria = modifyString(SearchCriteria, "contains", "like", 2);
@@ -1449,12 +1457,12 @@ SearchContentDirectory(struct upnphttp * h, const char * action)
 		{
 			SearchCriteria = modifyString(SearchCriteria, "res is ", "MIME is ", 0);
 		}
-		#if 0 // Does 360 need this?
-		if( strstr(SearchCriteria, "&amp;") )
+		if( strstr(SearchCriteria, "\\\"") )
 		{
-			SearchCriteria = modifyString(SearchCriteria, "&amp;", "&amp;amp;", 0);
+			if( !newSearchCriteria )
+				newSearchCriteria = strdup(SearchCriteria);
+			SearchCriteria = newSearchCriteria = modifyString(newSearchCriteria, "\\\"", "&amp;quot;", 0);
 		}
-		#endif
 	}
 	DPRINTF(E_DEBUG, L_HTTP, "Translated SearchCriteria: %s\n", SearchCriteria);
 
@@ -1488,9 +1496,8 @@ SearchContentDirectory(struct upnphttp * h, const char * action)
 #endif
 		orderBy = parse_sort_criteria(SortCriteria, &ret);
 	/* If it's a DLNA client, return an error for bad sort criteria */
-	if( (args.flags & FLAG_DLNA) && ret < 0 )
+	if( ret < 0 && ((args.flags & FLAG_DLNA) || GETFLAG(DLNA_STRICT_MASK)) )
 	{
-		free(orderBy);
 		SoapError(h, 709, "Unsupported or invalid sort criteria");
 		goto search_error;
 	}
