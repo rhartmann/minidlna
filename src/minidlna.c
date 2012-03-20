@@ -75,6 +75,7 @@
 
 
 #ifdef ENABLE_NLS
+#include <locale.h>
 #include <libintl.h>
 #endif
 
