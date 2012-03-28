@@ -380,7 +380,7 @@ init(int argc, char * * argv)
 	char * path;
 	char buf[PATH_MAX];
 	char ip_addr[INET_ADDRSTRLEN + 3] = {'\0'};
-	char log_str[72] = "general,artwork,database,inotify,scanner,metadata,http,ssdp,tivo=warn";
+	char log_str[75] = "general,artwork,database,inotify,scanner,metadata,http,ssdp,tivo=warn";
 	char *log_level = NULL;
 
 	/* first check if "-f" option is used */
@@ -827,6 +827,8 @@ init(int argc, char * * argv)
 	if(debug_flag)
 	{
 		pid = getpid();
+		strcpy(log_str+65, "maxdebug");
+		log_level = log_str;
 		log_init(NULL, log_level);
 	}
 	else
