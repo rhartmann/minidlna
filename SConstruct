@@ -407,6 +407,7 @@ if GetOption("enable_nls"):
         "po/ja.po",
         "po/nb.po",
         "po/nl.po",
+		  "po/pl.po",
         "po/ru.po",
         "po/sl.po",
         "po/sv.po"
