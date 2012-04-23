@@ -587,8 +587,7 @@ parse_sort_criteria(char *sortCriteria, int *error)
 		else
 		{
 			DPRINTF(E_ERROR, L_HTTP, "No order specified [%s]\n", item);
-			*error = -1;
-			goto unhandled_order;
+			goto bad_direction;
 		}
 		if( strcasecmp(item, "upnp:class") == 0 )
 		{
@@ -614,6 +613,7 @@ parse_sort_criteria(char *sortCriteria, int *error)
 		else
 		{
 			DPRINTF(E_ERROR, L_HTTP, "Unhandled SortCriteria [%s]\n", item);
+		bad_direction:
 			*error = -1;
 			if( i )
 			{
