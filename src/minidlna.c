@@ -337,8 +337,9 @@ static void read_file(img_t* img, const char* dir, const char *filename) {
 	char path[1024];
 	sprintf( path, "%s/%s", dir, filename);
 	FILE *file = fopen(path, "rb");
+	size_t nsize = 0;
+	char err[1024];
 	if(!file) {
-		char err[1024];
 		sprintf(err, "Failed to open path %s", path);
 
 		perror(err);
@@ -353,7 +354,9 @@ static void read_file(img_t* img, const char* dir, const char *filename) {
 		perror("read_file(): failed to allocate memory");
 		exit(EXIT_FAILURE);
 	}
-	fread(img->data, sizeof(char), img->size, file);
+	if ( ( nsize = fread(img->data, sizeof(char), img->size, file) ) < 0 ) {
+		sprintf(err, "Failed to read file\n");
+	}
 	fclose(file);
 }
 
