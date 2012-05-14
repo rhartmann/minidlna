@@ -87,8 +87,6 @@
 #define MAX_BUFFER_SIZE 2147483647 // 2GB -- Too much?
 #define MIN_BUFFER_SIZE 65536
 
-#include "icons.c"
-
 enum event_type {
         E_INVALID,
         E_SUBSCRIBE,
