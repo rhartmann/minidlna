@@ -592,9 +592,6 @@ init(int argc, char * * argv)
 				if( (strcmp(ary_options[i].value, "yes") == 0) || atoi(ary_options[i].value) )
 					SETFLAG(DLNA_STRICT_MASK);
 				break;
-			case UPNPMINISSDPDSOCKET:
-				minissdpdsocketpath = ary_options[i].value;
-				break;
 			case ROOT_CONTAINER:
 				switch( ary_options[i].value[0] )
 				{
@@ -622,6 +619,12 @@ init(int argc, char * * argv)
 						ary_options[i].value);
 					break;
 				}
+				break;
+			case UPNPMINISSDPDSOCKET:
+				minissdpdsocketpath = ary_options[i].value;
+				break;
+			case UPNPUUID:
+				strcpy(uuidvalue+5, ary_options[i].value);
 				break;
 			default:
 				DPRINTF(E_ERROR, L_GENERAL, "Unknown option in file %s\n",
