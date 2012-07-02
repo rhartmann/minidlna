@@ -15,6 +15,8 @@
  * You should have received a copy of the GNU General Public License
  * along with MiniDLNA. If not, see <http://www.gnu.org/licenses/>.
  */
+#include "config.h"
+
 #include <stdio.h>
 #include <ctype.h>
 #include <string.h>
@@ -26,7 +28,6 @@
 #include <sys/param.h>
 #include <fcntl.h>
 
-#include "config.h"
 #include <libexif/exif-loader.h>
 #include "image_utils.h"
 #include "tagutils/tagutils.h"
@@ -93,12 +94,46 @@ enum audio_profiles {
 	PROFILE_AUDIO_AMR
 };
 
+static inline int
+lav_open(AVFormatContext **ctx, const char *filename)
+{
+	int ret;
+#if LIBAVFORMAT_VERSION_INT >= ((53<<16)+(2<<8)+0)
+	ret = avformat_open_input(ctx, filename, NULL, NULL);
+	if (ret == 0)
+        	avformat_find_stream_info(*ctx, NULL);
+#else
+	ret = av_open_input_file(ctx, filename, NULL, 0, NULL);
+	if (ret == 0)
+		av_find_stream_info(*ctx);
+#endif
+	return ret;
+}
+
+static inline void
+lav_close(AVFormatContext *ctx)
+{
+#if LIBAVFORMAT_VERSION_INT >= ((53<<16)+(2<<8)+0)
+	avformat_close_input(&ctx);
+#else
+	av_close_input_file(ctx);
+#endif
+}
+
+#if LIBAVFORMAT_VERSION_INT >= ((52<<16)+(31<<8)+0)
+# if LIBAVUTIL_VERSION_INT < ((51<<16)+(5<<8)+0)
+#define AV_DICT_IGNORE_SUFFIX AV_METADATA_IGNORE_SUFFIX
+#define av_dict_get av_metadata_get
+typedef AVMetadataTag AVDictionaryEntry;
+# endif
+#endif
+
 /* This function shamelessly copied from libdlna */
 #define MPEG_TS_SYNC_CODE 0x47
 #define MPEG_TS_PACKET_LENGTH 188
 #define MPEG_TS_PACKET_LENGTH_DLNA 192 /* prepends 4 bytes to TS packet */
 int
-dlna_timestamp_is_present(const char * filename, int * raw_packet_size)
+dlna_timestamp_is_present(const char *filename, int *raw_packet_size)
 {
 	unsigned char buffer[3*MPEG_TS_PACKET_LENGTH_DLNA];
 	int fd, i;
@@ -137,28 +172,8 @@ dlna_timestamp_is_present(const char * filename, int * raw_packet_size)
 	return 0;
 }
 
-#ifdef TIVO_SUPPORT
-int
-is_tivo_file(const char * path)
-{
-	unsigned char buf[5];
-	unsigned char hdr[5] = { 'T','i','V','o','\0' };
-	int fd;
-
-	/* read file header */
-	fd = open(path, O_RDONLY);
-	if( !fd )
-		return 0;
-	if( read(fd, buf, 5) < 0 )
-		buf[0] = 'X';
-	close(fd);
-
-	return !memcmp(buf, hdr, 5);
-}
-#endif
-
 void
-check_for_captions(const char * path, sqlite_int64 detailID)
+check_for_captions(const char *path, int64_t detailID)
 {
 	char *file = malloc(MAXPATHLEN);
 	char *id = NULL;
@@ -198,7 +213,7 @@ no_source_video:
 }
 
 void
-parse_nfo(const char * path, metadata_t * m)
+parse_nfo(const char *path, metadata_t *m)
 {
 	FILE *nfo;
 	char buf[65536];
@@ -249,7 +264,7 @@ parse_nfo(const char * path, metadata_t * m)
 }
 
 void
-free_metadata(metadata_t * m, uint32_t flags)
+free_metadata(metadata_t *m, uint32_t flags)
 {
 	if( flags & FLAG_TITLE )
 		free(m->title);
@@ -285,8 +300,8 @@ free_metadata(metadata_t * m, uint32_t flags)
 		free(m->rotation);
 }
 
-sqlite_int64
-GetFolderMetadata(const char * name, const char * path, const char * artist, const char * genre, sqlite_int64 album_art)
+int64_t
+GetFolderMetadata(const char *name, const char *path, const char *artist, const char *genre, int64_t album_art)
 {
 	int ret;
 
@@ -303,16 +318,16 @@ GetFolderMetadata(const char * name, const char * path, const char * artist, con
 	return ret;
 }
 
-sqlite_int64
-GetAudioMetadata(const char * path, char * name)
+int64_t
+GetAudioMetadata(const char *path, char *name)
 {
 	char type[4];
 	static char lang[6] = { '\0' };
 	struct stat file;
-	sqlite_int64 ret;
+	int64_t ret;
 	char *esc_tag;
 	int i;
-	sqlite_int64 album_art = 0;
+	int64_t album_art = 0;
 	struct song_metadata song;
 	metadata_t m;
 	uint32_t free_flags = FLAG_MIME|FLAG_DURATION|FLAG_DLNA_PN|FLAG_DATE;
@@ -508,8 +523,8 @@ libjpeg_error_handler(j_common_ptr cinfo)
 	return;
 }
 
-sqlite_int64
-GetImageMetadata(const char * path, char * name)
+int64_t
+GetImageMetadata(const char *path, char *name)
 {
 	ExifData *ed;
 	ExifEntry *e = NULL;
@@ -521,8 +536,8 @@ GetImageMetadata(const char * path, char * name)
 	char make[32], model[64] = {'\0'};
 	char b[1024];
 	struct stat file;
-	sqlite_int64 ret;
-	image_s * imsrc;
+	int64_t ret;
+	image_s *imsrc;
 	metadata_t m;
 	uint32_t free_flags = 0xFFFFFFFF;
 	memset(&m, '\0', sizeof(metadata_t));
@@ -680,8 +695,8 @@ no_exifdata:
 	return ret;
 }
 
-sqlite_int64
-GetVideoMetadata(const char * path, char * name)
+int64_t
+GetVideoMetadata(const char *path, char *name)
 {
 	struct stat file;
 	int ret, i;
@@ -691,7 +706,7 @@ GetVideoMetadata(const char * path, char * name)
 	int audio_stream = -1, video_stream = -1;
 	enum audio_profiles audio_profile = PROFILE_AUDIO_UNKNOWN;
 	char fourcc[4];
-	sqlite_int64 album_art = 0;
+	int64_t album_art = 0;
 	char nfo[MAXPATHLEN], *ext;
 	struct song_metadata video;
 	metadata_t m;
@@ -707,16 +722,12 @@ GetVideoMetadata(const char * path, char * name)
 	strip_ext(name);
 	//DEBUG DPRINTF(E_DEBUG, L_METADATA, " * size: %jd\n", file.st_size);
 
-	#if LIBAVFORMAT_VERSION_INT >= ((53<<16)+(2<<8)+0)
-	if( avformat_open_input(&ctx, path, NULL, NULL) != 0 )
-	#else
-	if( av_open_input_file(&ctx, path, NULL, 0, NULL) != 0 )
-	#endif
+	ret = lav_open(&ctx, path);
+	if( ret != 0 )
 	{
 		DPRINTF(E_WARN, L_METADATA, "Opening %s failed!\n", path);
 		return 0;
 	}
-	av_find_stream_info(ctx);
 	//dump_format(ctx, 0, NULL, 0);
 	for( i=0; i<ctx->nb_streams; i++)
 	{
@@ -740,7 +751,7 @@ GetVideoMetadata(const char * path, char * name)
 	if( !vc )
 	{
 		/* This must not be a video file. */
-		av_close_input_file(ctx);
+		lav_close(ctx);
 		if( !is_audio(path) )
 			DPRINTF(E_DEBUG, L_METADATA, "File %s does not contain a video stream.\n", basepath);
 		free(path_cpy);
@@ -1523,10 +1534,10 @@ GetVideoMetadata(const char * path, char * name)
 	{
 		if( ctx->metadata )
 		{
-			AVMetadataTag *tag = NULL;
+			AVDictionaryEntry *tag = NULL;
 
 			//DEBUG DPRINTF(E_DEBUG, L_METADATA, "Metadata:\n");
-			while( (tag = av_metadata_get(ctx->metadata, "", tag, AV_METADATA_IGNORE_SUFFIX)) )
+			while( (tag = av_dict_get(ctx->metadata, "", tag, AV_DICT_IGNORE_SUFFIX)) )
 			{
 				//DEBUG DPRINTF(E_DEBUG, L_METADATA, "  %-16s: %s\n", tag->key, tag->value);
 				if( strcmp(tag->key, "title") == 0 )
@@ -1543,7 +1554,7 @@ GetVideoMetadata(const char * path, char * name)
 	#endif
 	#endif
 video_no_dlna:
-	av_close_input_file(ctx);
+	lav_close(ctx);
 
 #ifdef TIVO_SUPPORT
 	if( ends_with(path, ".TiVo") && is_tivo_file(path) )

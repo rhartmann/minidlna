@@ -76,10 +76,8 @@
 #include "log.h"
 #include "sql.h"
 #include <libexif/exif-loader.h>
-#ifdef TIVO_SUPPORT
 #include "tivo_utils.h"
 #include "tivo_commands.h"
-#endif
 
 #include "sendfile.h"
 
@@ -1623,31 +1621,33 @@ SendResp_resizedimg(struct upnphttp * h, char * object)
 	int width=640, height=480, dstw, dsth, size;
 	int srcw, srch;
 	unsigned char * data = NULL;
-	char *path, *file_path;
-	char *resolution;
+	char *path, *file_path = NULL;
+	char *resolution = NULL;
 	char *key, *val;
-	char *saveptr, *item=NULL;
+	char *saveptr, *item = NULL;
 	int rotate;
 	/* Not implemented yet *
 	char *pixelshape=NULL; */
-	sqlite_int64 id;
+	long long id;
 	int rows=0, chunked, ret;
 	image_s *imsrc = NULL, *imdst = NULL;
 	int scale = 1;
 
 	id = strtoll(object, &saveptr, 10);
-	snprintf(buf, sizeof(buf), "SELECT PATH, RESOLUTION, ROTATION from DETAILS where ID = '%lld'", id);
+	snprintf(buf, sizeof(buf), "SELECT PATH, RESOLUTION, ROTATION from DETAILS where ID = '%lld'", (long long)id);
 	ret = sql_get_table(db, buf, &result, &rows, NULL);
-	if( (ret != SQLITE_OK) )
+	if( ret != SQLITE_OK )
 	{
-		DPRINTF(E_ERROR, L_HTTP, "Didn't find valid file for %lld!\n", id);
 		Send500(h);
 		return;
 	}
-	file_path = result[3];
-	resolution = result[4];
-	rotate = result[5] ? atoi(result[5]) : 0;
-	if( !rows || !file_path || !resolution || (access(file_path, F_OK) != 0) )
+	if( rows )
+	{
+		file_path = result[3];
+		resolution = result[4];
+		rotate = result[5] ? atoi(result[5]) : 0;
+	}
+	if( !file_path || !resolution || (access(file_path, F_OK) != 0) )
 	{
 		DPRINTF(E_WARN, L_HTTP, "%s not found, responding ERROR 404\n", object);
 		sqlite3_free_table(result);
@@ -1660,9 +1660,7 @@ SendResp_resizedimg(struct upnphttp * h, char * object)
 	path = saveptr ? saveptr + 1 : object;
 	for( item = strtok_r(path, "&,", &saveptr); item != NULL; item = strtok_r(NULL, "&,", &saveptr) )
 	{
-#ifdef TIVO_SUPPORT
 		decodeString(item, 1);
-#endif
 		val = item;
 		key = strsep(&val, "=");
 		if( !val )
@@ -1848,10 +1846,10 @@ SendResp_dlnafile(struct upnphttp * h, char * object)
 	char date[30];
 	time_t curtime = time(NULL);
 	off_t total, offset, size;
-	sqlite_int64 id;
+	int64_t id;
 	int sendfh;
 	uint32_t dlna_flags = DLNA_FLAG_DLNA_V1_5|DLNA_FLAG_HTTP_STALLING|DLNA_FLAG_TM_B;
-	static struct { sqlite_int64 id;
+	static struct { int64_t id;
 	                enum client_types client;
 	                char path[PATH_MAX];
 	                char mime[32];
@@ -1875,7 +1873,7 @@ SendResp_dlnafile(struct upnphttp * h, char * object)
 	}
 	if( id != last_file.id || h->req_client != last_file.client )
 	{
-		snprintf(buf, sizeof(buf), "SELECT PATH, MIME, DLNA_PN from DETAILS where ID = '%lld'", id);
+		snprintf(buf, sizeof(buf), "SELECT PATH, MIME, DLNA_PN from DETAILS where ID = '%lld'", (long long)id);
 		ret = sql_get_table(db, buf, &result, &rows, NULL);
 		if( (ret != SQLITE_OK) )
 		{
