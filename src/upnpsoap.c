@@ -1205,7 +1205,7 @@ BrowseContentDirectory(struct upnphttp * h, const char * action)
 		{
 			ptr = sql_get_text_field(db, "SELECT OBJECT_ID from OBJECTS"
 			                             " where OBJECT_ID in "
-			                             "('"MUSIC_ID"$%s', '"VIDEO_ID"$%s', '"IMAGE_ID"$%s')",
+			                             "('"MUSIC_ID"$%q', '"VIDEO_ID"$%q', '"IMAGE_ID"$%q')",
 			                             ObjectID, ObjectID, ObjectID);
 			if( ptr )
 			{
@@ -1246,7 +1246,7 @@ BrowseContentDirectory(struct upnphttp * h, const char * action)
 		args.requested = 1;
 		sql = sqlite3_mprintf("SELECT %s, " COLUMNS
 		                      "from OBJECTS o left join DETAILS d on (d.ID = o.DETAIL_ID)"
-	        	              " where OBJECT_ID = '%s';",
+	        	              " where OBJECT_ID = '%q';",
 		                      (args.flags & FLAG_ROOT_CONTAINER) ? "0, -1" : "o.OBJECT_ID, o.PARENT_ID",
 		                      ObjectID);
 		ret = sqlite3_exec(db, sql, callback, (void *) &args, &zErrMsg);
@@ -1254,7 +1254,7 @@ BrowseContentDirectory(struct upnphttp * h, const char * action)
 	}
 	else
 	{
-		ret = sql_get_int_field(db, "SELECT count(*) from OBJECTS where PARENT_ID = '%s'", ObjectID);
+		ret = sql_get_int_field(db, "SELECT count(*) from OBJECTS where PARENT_ID = '%q'", ObjectID);
 		totalMatches = (ret > 0) ? ret : 0;
 		ret = 0;
 		if( SortCriteria )
@@ -1295,7 +1295,7 @@ BrowseContentDirectory(struct upnphttp * h, const char * action)
 
 		sql = sqlite3_mprintf( SELECT_COLUMNS
 		                      "from OBJECTS o left join DETAILS d on (d.ID = o.DETAIL_ID)"
-				      " where PARENT_ID = '%s' %s limit %d, %d;",
+				      " where PARENT_ID = '%q' %s limit %d, %d;",
 				      ObjectID, orderBy, StartingIndex, RequestedCount);
 		DPRINTF(E_DEBUG, L_HTTP, "Browse SQL: %s\n", sql);
 		ret = sqlite3_exec(db, sql, callback, (void *) &args, &zErrMsg);
@@ -1311,7 +1311,7 @@ BrowseContentDirectory(struct upnphttp * h, const char * action)
 	/* Does the object even exist? */
 	if( !totalMatches )
 	{
-		ret = sql_get_int_field(db, "SELECT count(*) from OBJECTS where OBJECT_ID = '%s'", ObjectID);
+		ret = sql_get_int_field(db, "SELECT count(*) from OBJECTS where OBJECT_ID = '%q'", ObjectID);
 		if( ret <= 0 )
 		{
 			SoapError(h, 701, "No such object error");
@@ -1333,6 +1333,254 @@ browse_error:
 	free(str.data);
 }
 
+inline void
+charcat(struct string_s *str, char c)
+{
+	if (str->size <= str->off)
+	{
+		str->data[str->size-1] = '\0';
+		return;
+	}
+	str->data[str->off] = c;
+	str->off += 1;
+}
+
+static inline char *
+parse_search_criteria(const char *str)
+{
+	struct string_s criteria;
+	int len;
+	int literal = 0, like = 0;
+	const char *s;
+
+	if (!str)
+		return strdup("1 = 1");
+
+	len = strlen(str) + 32;
+	criteria.data = malloc(len);
+	criteria.size = len;
+	criteria.off = 0;
+
+	s = str;
+
+	while (isspace(*s))
+		s++;
+
+	while (*s)
+	{
+		if (literal)
+		{
+			switch (*s) {
+			case '&':
+				if (strncmp(s, "&quot;", 6) == 0)
+					s += 5;
+				else if (strncmp(s, "&apos;", 6) == 0)
+				{
+					strcatf(&criteria, "'");
+					s += 6;
+					continue;
+				}
+				else
+					break;
+			case '"':
+				literal = 0;
+				if (like)
+				{
+					charcat(&criteria, '%');
+					like--;
+				}
+				charcat(&criteria, '"');
+				break;
+			case '\\':
+				if (strncmp(s, "\\&quot;", 7) == 0)
+				{
+					strcatf(&criteria, "&amp;quot;");
+					s += 7;
+					continue;
+				}
+				break;
+			case 'o':
+				if (strncmp(s, "object.", 7) == 0)
+					s += 7;
+			default:
+				charcat(&criteria, *s);
+				break;
+			}
+		}
+		else
+		{
+			switch (*s) {
+			case '\\':
+				if (strncmp(s, "\\&quot;", 7) == 0)
+				{
+					strcatf(&criteria, "&amp;quot;");
+					s += 7;
+					continue;
+				}
+				else
+					charcat(&criteria, *s);
+				break;
+			case '"':
+				literal = 1;
+				charcat(&criteria, *s);
+				if (like == 2)
+				{
+					charcat(&criteria, '%');
+					like--;
+				}
+				break;
+			case '&':
+				if (strncmp(s, "&quot;", 6) == 0)
+				{
+					literal = 1;
+					strcatf(&criteria, "\"");
+					if (like == 2)
+					{
+						charcat(&criteria, '%');
+						like--;
+					}
+					s += 5;
+				}
+				else if (strncmp(s, "&apos;", 6) == 0)
+				{
+					strcatf(&criteria, "'");
+					s += 5;
+				}
+				else if (strncmp(s, "&lt;", 4) == 0)
+				{
+					strcatf(&criteria, "<");
+					s += 3;
+				}
+				else if (strncmp(s, "&gt;", 4) == 0)
+				{
+					strcatf(&criteria, ">");
+					s += 3;
+				}
+				else
+					charcat(&criteria, *s);
+				break;
+			case '@':
+				if (strncmp(s, "@refID", 6) == 0)
+				{
+					strcatf(&criteria, "REF_ID");
+					s += 6;
+					continue;
+				}
+				else if (strncmp(s, "@id", 3) == 0)
+				{
+					strcatf(&criteria, "OBJECT_ID");
+					s += 3;
+					continue;
+				}
+				else
+					charcat(&criteria, *s);
+				break;
+			case 'c':
+				if (strncmp(s, "contains", 8) == 0)
+				{
+					strcatf(&criteria, "like");
+					s += 8;
+					like = 2;
+					continue;
+				}
+				else
+					charcat(&criteria, *s);
+				break;
+			case 'd':
+				if (strncmp(s, "derivedfrom", 11) == 0)
+				{
+					strcatf(&criteria, "like");
+					s += 11;
+					like = 1;
+					continue;
+				}
+				else if (strncmp(s, "dc:date", 7) == 0)
+				{
+					strcatf(&criteria, "d.DATE");
+					s += 7;
+					continue;
+				}
+				else if (strncmp(s, "dc:title", 8) == 0)
+				{
+					strcatf(&criteria, "d.TITLE");
+					s += 8;
+					continue;
+				}
+				else if (strncmp(s, "dc:creator", 10) == 0)
+				{
+					strcatf(&criteria, "d.CREATOR");
+					s += 10;
+					continue;
+				}
+				else
+					charcat(&criteria, *s);
+				break;
+			case 'e':
+				if (strncmp(s, "exists", 6) == 0)
+				{
+					s += 6;
+					while (isspace(*s))
+						s++;
+					if (strncmp(s, "true", 4) == 0)
+					{
+						strcatf(&criteria, "is not NULL");
+						s += 3;
+					}
+					else if (strncmp(s, "false", 5) == 0)
+					{
+						strcatf(&criteria, "is NULL");
+						s += 4;
+					}
+				}
+				else
+					charcat(&criteria, *s);
+				break;
+			case 'u':
+				if (strncmp(s, "upnp:class", 10) == 0)
+				{
+					strcatf(&criteria, "o.CLASS");
+					s += 10;
+					continue;
+				}
+				else if (strncmp(s, "upnp:actor", 10) == 0)
+				{
+					strcatf(&criteria, "d.ARTIST");
+					s += 10;
+					continue;
+				}
+				else if (strncmp(s, "upnp:artist", 11) == 0)
+				{
+					strcatf(&criteria, "d.ARTIST");
+					s += 11;
+					continue;
+				}
+				else if (strncmp(s, "upnp:album", 10) == 0)
+				{
+					strcatf(&criteria, "d.ALBUM");
+					s += 10;
+					continue;
+				}
+				else if (strncmp(s, "upnp:genre", 10) == 0)
+				{
+					strcatf(&criteria, "d.GENRE");
+					s += 10;
+					continue;
+				}
+				else
+					charcat(&criteria, *s);
+				break;
+			default:
+				charcat(&criteria, *s);
+				break;
+			}
+		}
+		s++;
+	}
+	charcat(&criteria, '\0');
+
+	return criteria.data;
+}
+
 static void
 SearchContentDirectory(struct upnphttp * h, const char * action)
 {
@@ -1349,7 +1597,7 @@ SearchContentDirectory(struct upnphttp * h, const char * action)
 	int totalMatches;
 	int ret;
 	char *ContainerID, *Filter, *SearchCriteria, *SortCriteria;
-	char *newSearchCriteria = NULL, *orderBy = NULL;
+	char *orderBy = NULL;
 	char groupBy[] = "group by DETAIL_ID";
 	struct NameValueParserData data;
 	int RequestedCount = 0;
@@ -1403,7 +1651,7 @@ SearchContentDirectory(struct upnphttp * h, const char * action)
 		{
 			ptr = sql_get_text_field(db, "SELECT OBJECT_ID from OBJECTS"
 			                             " where OBJECT_ID in "
-			                             "('"MUSIC_ID"$%s', '"VIDEO_ID"$%s', '"IMAGE_ID"$%s')",
+			                             "('"MUSIC_ID"$%q', '"VIDEO_ID"$%q', '"IMAGE_ID"$%q')",
 			                             ContainerID, ContainerID, ContainerID);
 			if( ptr )
 			{
@@ -1426,53 +1674,17 @@ SearchContentDirectory(struct upnphttp * h, const char * action)
 		*ContainerID = '*';
 	else if( strcmp(ContainerID, MUSIC_ALL_ID) == 0 )
 		groupBy[0] = '\0';
-	if( !SearchCriteria )
-	{
-		SearchCriteria = strdup("1 = 1");
-	}
-	else
-	{
-		SearchCriteria = modifyString(SearchCriteria, "&quot;", "\"", 0);
-		SearchCriteria = modifyString(SearchCriteria, "&apos;", "'", 0);
-		SearchCriteria = modifyString(SearchCriteria, "&lt;", "<", 0);
-		SearchCriteria = modifyString(SearchCriteria, "&gt;", ">", 0);
-		SearchCriteria = modifyString(SearchCriteria, "object.", "", 0);
-		SearchCriteria = modifyString(SearchCriteria, "derivedfrom", "like", 1);
-		SearchCriteria = modifyString(SearchCriteria, "contains", "like", 2);
-		SearchCriteria = modifyString(SearchCriteria, "dc:date", "d.DATE", 0);
-		SearchCriteria = modifyString(SearchCriteria, "dc:title", "d.TITLE", 0);
-		SearchCriteria = modifyString(SearchCriteria, "dc:creator", "d.CREATOR", 0);
-		SearchCriteria = modifyString(SearchCriteria, "upnp:class", "o.CLASS", 0);
-		SearchCriteria = modifyString(SearchCriteria, "upnp:actor", "d.ARTIST", 0);
-		SearchCriteria = modifyString(SearchCriteria, "upnp:artist", "d.ARTIST", 0);
-		SearchCriteria = modifyString(SearchCriteria, "upnp:album", "d.ALBUM", 0);
-		SearchCriteria = modifyString(SearchCriteria, "upnp:genre", "d.GENRE", 0);
-		SearchCriteria = modifyString(SearchCriteria, "exists true", "is not NULL", 0);
-		SearchCriteria = modifyString(SearchCriteria, "exists false", "is NULL", 0);
-		SearchCriteria = modifyString(SearchCriteria, "@refID", "REF_ID", 0);
-		if( strstr(SearchCriteria, "@id") )
-		{
-			SearchCriteria = modifyString(SearchCriteria, "@id", "OBJECT_ID", 0);
-		}
-		if( strstr(SearchCriteria, "res is ") )
-		{
-			SearchCriteria = modifyString(SearchCriteria, "res is ", "MIME is ", 0);
-		}
-		if( strstr(SearchCriteria, "\\\"") )
-		{
-			if( !newSearchCriteria )
-				newSearchCriteria = strdup(SearchCriteria);
-			SearchCriteria = newSearchCriteria = modifyString(newSearchCriteria, "\\\"", "&amp;quot;", 0);
-		}
-	}
+
+	SearchCriteria = parse_search_criteria(SearchCriteria);
+	
 	DPRINTF(E_DEBUG, L_HTTP, "Translated SearchCriteria: %s\n", SearchCriteria);
 
 	totalMatches = sql_get_int_field(db, "SELECT (select count(distinct DETAIL_ID)"
 	                                     " from OBJECTS o left join DETAILS d on (o.DETAIL_ID = d.ID)"
-	                                     " where (OBJECT_ID glob '%s$*') and (%s))"
+	                                     " where (OBJECT_ID glob '%q$*') and (%s))"
 	                                     " + "
 	                                     "(select count(*) from OBJECTS o left join DETAILS d on (o.DETAIL_ID = d.ID)"
-	                                     " where (OBJECT_ID = '%s') and (%s))",
+	                                     " where (OBJECT_ID = '%q') and (%s))",
 	                                     ContainerID, SearchCriteria, ContainerID, SearchCriteria);
 	if( totalMatches < 0 )
 	{
@@ -1505,14 +1717,14 @@ SearchContentDirectory(struct upnphttp * h, const char * action)
 
 	sql = sqlite3_mprintf( SELECT_COLUMNS
 	                      "from OBJECTS o left join DETAILS d on (d.ID = o.DETAIL_ID)"
-	                      " where OBJECT_ID glob '%s$*' and (%s) %s "
+	                      " where OBJECT_ID glob '%q$*' and (%s) %s "
 	                      "%z %s"
 	                      " limit %d, %d",
 	                      ContainerID, SearchCriteria, groupBy,
 	                      (*ContainerID == '*') ? NULL :
 	                      sqlite3_mprintf("UNION ALL " SELECT_COLUMNS
 	                                      "from OBJECTS o left join DETAILS d on (d.ID = o.DETAIL_ID)"
-	                                      " where OBJECT_ID = '%s' and (%s) ", ContainerID, SearchCriteria),
+	                                      " where OBJECT_ID = '%q' and (%s) ", ContainerID, SearchCriteria),
 	                      orderBy, StartingIndex, RequestedCount);
 	DPRINTF(E_DEBUG, L_HTTP, "Search SQL: %s\n", sql);
 	ret = sqlite3_exec(db, sql, callback, (void *) &args, &zErrMsg);
@@ -1534,6 +1746,7 @@ search_error:
 	if( args.flags & FLAG_FREE_OBJECT_ID )
 		sqlite3_free(ContainerID);
 	free(orderBy);
+	free(SearchCriteria);
 	free(str.data);
 }
 
@@ -1625,7 +1838,7 @@ SamsungSetBookmark(struct upnphttp * h, const char * action)
 		int ret;
 		ret = sql_exec(db, "INSERT OR REPLACE into BOOKMARKS"
 		                   " VALUES "
-		                   "((select DETAIL_ID from OBJECTS where OBJECT_ID = '%s'), %s)", ObjectID, PosSecond);
+		                   "((select DETAIL_ID from OBJECTS where OBJECT_ID = '%q'), %q)", ObjectID, PosSecond);
 		if( ret != SQLITE_OK )
 			DPRINTF(E_WARN, L_METADATA, "Error setting bookmark %s on ObjectID='%s'\n", PosSecond, ObjectID);
 		BuildSendAndCloseSoapResp(h, resp, sizeof(resp)-1);

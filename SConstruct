@@ -326,11 +326,15 @@ if not env.GetOption('clean') and not env.GetOption('help'):
     conf.Define("DEFAULT_LOG_PATH", '"%s"' % log_path, "Default log path")
     
     
-    os_url = ""
     os_name = platform.system();
     os_version = version.LooseVersion(platform.release());
     tivo = netgear = readynas = False
     pnpx = 0
+    os_url = "http://sourceforge.net/projects/minidlna/"
+    rootdev_manufacturerurl  = "http://www.netgear.com/"
+    rootdev_manufacturer     = "Justin Maggard"
+    rootdev_modelname        = "Windows Media Connect compatible (MiniDLNA)"
+    rootdev_modeldescription = "MiniDLNA"
     
     if os_name == "OpenBSD":
         
@@ -386,14 +390,26 @@ if not env.GetOption('clean') and not env.GetOption('help'):
     else :
         print("Unknown operating system '%s'" % os_name)
         Exit(2)
-    
+   
+    rootdev_modelurl         = os_url
+
     conf.config_h_text += "\n"
     conf.Define('OS_VERSION', '"%s"'%str(os_version), "Version of the operating system")
     conf.config_h_text += "\n"
     conf.Define('OS_NAME', '"%s"'%str(os_name), "Name of the operating system")
     conf.config_h_text += "\n"
     conf.Define('OS_URL', '"%s"'%str(os_url), "URL for operating system")
-
+    conf.config_h_text += "\n"
+    conf.Define('ROOTDEV_MANUFACTURERURL', '"%s"'%str(rootdev_manufacturerurl), "URL of manufacturer")
+    conf.config_h_text += "\n"
+    conf.Define('ROOTDEV_MANUFACTURER', '"%s"'%str(rootdev_manufacturer), "Manufacturer")
+    conf.config_h_text += "\n"
+    conf.Define('ROOTDEV_MODELNAME', '"%s"'%str(rootdev_modelname), "Model name");
+    conf.config_h_text += "\n"
+    conf.Define('ROOTDEV_MODELDESCRIPTION', '"%s"'%str(rootdev_modeldescription), "Model description")
+    conf.config_h_text += "\n"
+    conf.Define('ROOTDEV_MODELURL', '"%s"'%str(rootdev_modelurl), "Model URL")
+	
     if tivo:
         conf.config_h_text += "\n"
         conf.Define('TIVO_SUPPORT', 1, "Compile in TiVo support.")
@@ -406,8 +422,9 @@ if not env.GetOption('clean') and not env.GetOption('help'):
     
     conf.config_h_text += "\n"
     conf.Define('PNPX', pnpx, "Enable PnPX support.")
-
+    conf.config_h_text += "\n"
     conf.Define('DATADIR', '"%s"'%str(datadir), "Data directory");
+    conf.config_h_text += "\n"
     conf.Define('PACKAGE_NAME', '"%s"'%str(package_name), "Package name");
 
 

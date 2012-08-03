@@ -61,8 +61,8 @@ static const struct {
 	{ UPNPMINISSDPDSOCKET, "minissdpdsocket"},
 	{ ENABLE_TIVO, "enable_tivo" },
 	{ ENABLE_DLNA_STRICT, "strict_dlna" },
-	{ UPNPMINISSDPDSOCKET, "minissdpdsocket"},
-	{ ROOT_CONTAINER, "root_container" }
+	{ ROOT_CONTAINER, "root_container" },
+	{ USER_ACCOUNT, "user" }
 };
 
 int
