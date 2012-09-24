@@ -660,6 +660,32 @@ ScanDirectory(const char *dir, const char *parent, enum media_types dir_type)
 	setlocale(LC_COLLATE, "");
 
 	DPRINTF(parent?E_INFO:E_WARN, L_SCANNER, _("Scanning %s\n"), dir);
+
+	if( !parent )
+	{
+		// This is a media_dir entry - it has no parent.
+ 
+		// Insert dir as a directory entry to the browse dir
+		// instead of directly adding it's contents to the browse dir.
+		startID = get_next_available_id("OBJECTS", BROWSEDIR_ID);
+		name = escape_tag(dir, 1);
+		insert_directory(basename(name), dir, BROWSEDIR_ID, "", startID);
+ 
+		// Now scan the dir with it's directory entry as the parent.
+		// That way, the content will be added to the directory entry,
+		// not the browse dir. Hence, the different media_dirs show up
+		// as folders and the contents don't mix up.
+		sprintf(parent_id, "$%X", startID);
+		ScanDirectory(dir, parent_id, dir_type);
+ 
+		free(name);
+ 
+		// We can return early here since the contents of this dir
+		// have been added now.
+		DPRINTF(E_WARN, L_SCANNER, _("Scanning %s finished (%llu files)!\n"), dir, fileno);
+		return;
+	}
+ 
 	switch( dir_type )
 	{
 		case ALL_MEDIA:
@@ -681,11 +707,6 @@ ScanDirectory(const char *dir, const char *parent, enum media_types dir_type)
 	if (n < 0) {
 		DPRINTF(E_WARN, L_SCANNER, "Error scanning %s\n", dir);
 		return;
-	}
-
-	if( !parent )
-	{
-		startID = get_next_available_id("OBJECTS", BROWSEDIR_ID);
 	}
 
 	for (i=0; i < n; i++)
@@ -724,10 +745,6 @@ ScanDirectory(const char *dir, const char *parent, enum media_types dir_type)
 		free(namelist[i]);
 	}
 	free(namelist);
-	if( !parent )
-	{
-		DPRINTF(E_WARN, L_SCANNER, _("Scanning %s finished (%llu files)!\n"), dir, fileno);
-	}
 }
 
 void
