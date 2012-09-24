@@ -465,7 +465,7 @@ insert_file(char *name, const char *path, const char *parentID, int object)
 	else if( is_video(name) )
 	{
  		orig_name = strdup(name);
-		strcpy(base, VIDEO_DIR_ID);
+		strcpy(base, VIDEO_ID);
 		strcpy(class, "item.videoItem");
 		detailID = GetVideoMetadata(path, name);
 		if( !detailID )
@@ -534,8 +534,6 @@ CreateDatabase(void)
 	                  MUSIC_PLIST_ID, MUSIC_ID, _("Playlists"),
 
 	                        VIDEO_ID, "0", _("Video"),
-	                    VIDEO_ALL_ID, VIDEO_ID, _("All Video"),
-	                    VIDEO_DIR_ID, VIDEO_ID, _("Folders"),
 
 	                        IMAGE_ID, "0", _("Pictures"),
 	                    IMAGE_ALL_ID, IMAGE_ID, _("All Pictures"),
