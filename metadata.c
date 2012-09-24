@@ -724,7 +724,11 @@ GetVideoMetadata(const char *path, char *name)
 	if( ret != 0 )
 	{
 		char err[128];
+#ifdef AVUTIL_ERROR_H
 		av_strerror(ret, err, sizeof(err));
+#else
+		sprintf(err, "Error code: %i", ret);
+#endif
 		DPRINTF(E_WARN, L_METADATA, "Opening %s failed! [%s]\n", path, err);
 		return 0;
 	}
