@@ -4,6 +4,7 @@ AC_INIT(MiniDLNA,1.1.0,,minidlna)
 AC_CANONICAL_TARGET
 AM_INIT_AUTOMAKE(minidlna,1.1.0)
 AC_CONFIG_HEADERS([config.h])
+AM_SILENT_RULES([yes])
 
 m4_ifdef([AC_USE_SYSTEM_EXTENSIONS], [AC_USE_SYSTEM_EXTENSIONS])
 
@@ -104,8 +105,6 @@ AC_COMPILE_IFELSE(
 
 ################################################################################################################
 ### Library checks
-AC_CHECK_LIB([dl], [dlopen], [LIBDL_LIBS="-ldl"],)
-AC_SUBST(LIBDL_LIBS)
 
 CPPFLAGS_SAVE="$CPPFLAGS"
 for dir in "" /usr/local $INCLUDE_DIR; do
